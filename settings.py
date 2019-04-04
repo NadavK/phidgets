@@ -1,5 +1,5 @@
 # PHIDGETS = [347616, ]
-CALLBACK_URLS = {'http://localhost:8080/api/': '3f9d70f25ca0ff54cb29e28ab41b64f42eec1cca'}           # PhidgetServer calls these urls to notify on phidget events
+CALLBACK_URLS = {'http://localhost:8080/api/': '3f9d70f25ca0ff54cb29e28ab41b64f42eec1cca'}           # PhidgetS calls these urls to notify on phidget events
 
 LOGGING = {
     'version': 1,
@@ -14,7 +14,7 @@ LOGGING = {
             'level': 'DEBUG',
             'class': 'logging.NullHandler',
             #'class': 'logging.FileHandler',
-            #'filename': 'log/PhidgetServer.log',
+            #'filename': 'log/PhidgetS.log',
         },
         'console': {
             'level': 'DEBUG',

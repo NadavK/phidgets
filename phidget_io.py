@@ -29,7 +29,7 @@ class PhidgetsManager:
     output_changed_external_handler = None
     INPUT = 'Input'
     OUTPUT = 'Output'
-    OUTPUTS_STATES_DB = 'phidgetserver_outputs.db'
+    OUTPUTS_STATES_DB = 'phidgets_outputs.db'
     STATES = 'states'
     DEFAULTS = 'defaults'
 

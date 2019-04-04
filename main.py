@@ -20,7 +20,7 @@ class Main:
         logging.config.dictConfig(settings.LOGGING)
         logger = logging.getLogger(__name__)
 
-        logger.info('=================== PhidgetServer starting ===================')
+        logger.info('=================== PhidgetS starting ===================')
         logger.info(__name__)
         logger.info(sys.argv)
         if len(sys.argv) < 2:
@@ -51,7 +51,7 @@ class Main:
 
     def exit_handler(self):
         logger = logging.getLogger(__name__)
-        logger.info('=================== PhidgetServer Exiting ===================')
+        logger.info('=================== PhidgetS Exiting ===================')
         if self.server:
             self.server.close()
 
