@@ -1,5 +1,5 @@
 # PhidgetS - A Phidget Service
-Provides an http to control and receive events from Phidget Devices.
+Provides an http interface to control and receive events from Phidget Devices.
 
 ## Installation
 ### Project
