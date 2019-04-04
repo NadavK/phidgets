@@ -68,8 +68,10 @@ class PhidgetsManager:
             with shelve.open(self.OUTPUTS_STATES_DB) as db:
                 states = dict(db)
                 self.logger.debug('Loaded outputs states: %s', states)
-            self.output_states = states[self.STATES]
-            self.default_output_state = states[self.DEFAULTS]
+            if self.STATES in states:
+                self.output_states = states[self.STATES]
+            if self.DEFAULTS in states:
+                self.default_output_state = states[self.DEFAULTS]
         except Exception as e:
             self.logger.exception('Failed reading from db')
 
@@ -122,12 +124,12 @@ class PhidgetsManager:
             ch_new.setOnStateChangeHandler(self.on_state_change_handler)
         except:
             pass  # if it fails, the it must not support state-change events
-        self.logger.debug("Manager attach event: %s %i/%i" % (ch_new.type, sn, index))
+        self.logger.debug("Manager attach event: %s %i/%i" % (python_klass_name, sn, index))
 
         ch_new.setOnAttachHandler(self.on_channel_attach_handler)
         ch_new.setOnDetachHandler(self.on_channel_detach_handler)
         ch_new.setOnErrorHandler(self.on_error_handler)
-        ch_new.setOnPropertyChangeHandler(self.on_property_change_handler)
+        #ch_new.setOnPropertyChangeHandler(self.on_property_change_handler)
 
         ch_new.setDeviceSerialNumber(sn)
         ch_new.setChannel(index)
@@ -138,9 +140,9 @@ class PhidgetsManager:
         # every so often, on_channel_attach_handler throws an exception on getDeviceSerialNumber()
         # this seems to fix it...
         #while not ch_new.getAttached():
-        #    self.logger.debug("Waiting for Attached: %s %i/%i" % (ch_new.type, sn, index))
+        #    self.logger.debug("Waiting for Attached: %s %i/%i" % (python_klass_name, sn, index))
         #    time.sleep(0.01)
-        self.logger.debug("Attached: %s %i/%i" % (ch_new.type, sn, index))
+        self.logger.debug("Attached: %s %i/%i" % (python_klass_name, sn, index))
 
     def on_channel_attach_handler(self, ch):
         """
