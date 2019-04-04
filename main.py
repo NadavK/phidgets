@@ -2,7 +2,6 @@ import atexit
 import cherrypy
 import logging
 import logging.config
-import signal
 import sys
 
 import settings
