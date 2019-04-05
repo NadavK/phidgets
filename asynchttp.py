@@ -57,6 +57,8 @@ class AsyncHttp:
                 r = requests.request(method=details.method, url=details.url, json=details.json, headers=details.headers)
                 r.raise_for_status()
                 self.logger.debug('Request response code: %s <-- %s ' % (r.status_code, details))
+            except requests.exceptions.RequestException as e:
+                self.logger.error('notify request failed on library exception \'%s\' for %s: ' % (type(e).__name__, details))
             except Exception:
-                self.logger.exception('notify request failed')
+                self.logger.exception('notify request failed on exception')
             self.q.task_done()
