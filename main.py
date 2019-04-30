@@ -24,7 +24,7 @@ class Main:
         logger.info(__name__)
         logger.info(sys.argv)
         if len(sys.argv) < 2:
-            logger.info('PhdigetServer expects ip:port param %s' % sys.argv)
+            logger.info('PhidgetServer expects ip:port param %s' % sys.argv)
             exit()
 
         if ':' in sys.argv[1]:

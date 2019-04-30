@@ -14,17 +14,13 @@ from Phidget22.PhidgetException import PhidgetException
 from channel_states import ChannelStates
 
 
-#TODO: subclass Phidget to add common functionality like __str__
-
-
 # Manages all Phidgets
 # Should really be a singleton
-#class PhidgetsManager(object):
 class PhidgetsManager:
     manager22 = None
     channels = {}
     default_output_state = ChannelStates()
-    output_states = ChannelStates()
+    output_states = ChannelStates()             # Needed to be able to set outputs on init to previous state
     input_changed_external_handler = None
     output_changed_external_handler = None
     INPUT = 'Input'
@@ -58,13 +54,13 @@ class PhidgetsManager:
             states = {self.STATES: self.output_states, self.DEFAULTS: self.default_output_state}
             with shelve.open(self.OUTPUTS_STATES_DB) as db:
                 db.update(states)
-            self.logger.debug('Saved output states: %s', states)
+            #self.logger.debug('Saved output states: %s', states)       # This is a long log line
         except Exception as e:
             self.logger.exception('Failed writing to db')
 
     def read_output_states(self):
         try:
-            self.logger.debug('Loading output states')
+            self.logger.info('Loading output states')
             with shelve.open(self.OUTPUTS_STATES_DB) as db:
                 states = dict(db)
                 self.logger.debug('Loaded outputs states: %s', states)
@@ -98,7 +94,7 @@ class PhidgetsManager:
         elif e.code == ErrorCode.EPHIDGET_UNKNOWNVAL:
             self.logger.error("Desc: %s", e.details)
         else:
-            self.logger.error("Phidget Error: %s", e.details)
+            self.logger.error("Phidget Error: %s %s", e.details, ErrorCode.getName(e.code))
 
     def on_manager_attach_handler(self, manager, ch_readonly):
         """
@@ -107,42 +103,47 @@ class PhidgetsManager:
         :param manager: The Phidget manager that fired the attach event
         :param ch_readonly: The READ-ONLY Phidget channel that fired the attach event
         """
-        sn = ch_readonly.getDeviceSerialNumber()
-        index = ch_readonly.getChannel()
-        klass = ch_readonly.getChannelClassName()
-
-        # Dynamically create a phidget channel
-        if klass.startswith('Phidget'):  # PhidgetDigitalInput
-            python_klass_name = klass.split('Phidget')[1]
-        else:
-            print('ERROR: Unknown classname: %s' % klass)
-            return
-        # Dynamically create phidget channel class
-        ch_new = getattr(importlib.import_module('Phidget22.Devices.' + python_klass_name), python_klass_name)()
-
         try:
-            ch_new.setOnStateChangeHandler(self.on_state_change_handler)
-        except:
-            pass  # if it fails, the it must not support state-change events
-        self.logger.debug("Manager attach event: %s %i/%i" % (python_klass_name, sn, index))
+            sn = ch_readonly.getDeviceSerialNumber()
+            index = ch_readonly.getChannel()
+            klass = ch_readonly.getChannelClassName()
 
-        ch_new.setOnAttachHandler(self.on_channel_attach_handler)
-        ch_new.setOnDetachHandler(self.on_channel_detach_handler)
-        ch_new.setOnErrorHandler(self.on_error_handler)
-        #ch_new.setOnPropertyChangeHandler(self.on_property_change_handler)
+            # Dynamically create a phidget channel
+            if klass.startswith('Phidget'):  # PhidgetDigitalInput
+                python_klass_name = klass.split('Phidget')[1]
+            else:
+                print('ERROR: Unknown classname: %s' % klass)
+                return
+            # Dynamically create phidget channel class
+            ch_new = getattr(importlib.import_module('Phidget22.Devices.' + python_klass_name), python_klass_name)()
 
-        ch_new.setDeviceSerialNumber(sn)
-        ch_new.setChannel(index)
-        #ch_new.open()
-        # every so often, on_channel_attach_handler throws an exception on getDeviceSerialNumber(). calling openWaitForAttachment seems to fix it
-        ch_new.openWaitForAttachment(10000)
+            try:
+                ch_new.setOnStateChangeHandler(self.on_state_change_handler)
+            except:
+                pass  # if it fails, the it must not support state-change events
+            self.logger.debug("Manager attach event: %s %i/%i" % (python_klass_name, sn, index))
 
-        # every so often, on_channel_attach_handler throws an exception on getDeviceSerialNumber()
-        # this seems to fix it...
-        #while not ch_new.getAttached():
-        #    self.logger.debug("Waiting for Attached: %s %i/%i" % (python_klass_name, sn, index))
-        #    time.sleep(0.01)
-        self.logger.debug("Attached: %s %i/%i" % (python_klass_name, sn, index))
+            ch_new.setOnAttachHandler(self.on_channel_attach_handler)
+            ch_new.setOnDetachHandler(self.on_channel_detach_handler)
+            ch_new.setOnErrorHandler(self.on_error_handler)
+            #ch_new.setOnPropertyChangeHandler(self.on_property_change_handler)
+
+            ch_new.setDeviceSerialNumber(sn)
+            ch_new.setChannel(index)
+            #ch_new.open()
+            # every so often, on_channel_attach_handler throws an exception on getDeviceSerialNumber(). calling openWaitForAttachment seems to fix it
+            ch_new.openWaitForAttachment(10000)
+
+            # every so often, on_channel_attach_handler throws an exception on getDeviceSerialNumber()
+            # this seems to fix it...
+            #while not ch_new.getAttached():
+            #    self.logger.debug("Waiting for Attached: %s %i/%i" % (python_klass_name, sn, index))
+            #    time.sleep(0.01)
+            self.logger.debug("Attached: %s %i/%i" % (python_klass_name, sn, index))
+
+        except PhidgetException as e:
+            self.logger.exception('**************Error in Manager Attach Event*********************')
+            self.display_error(e)
 
     def on_channel_attach_handler(self, ch):
         """
@@ -152,7 +153,7 @@ class PhidgetsManager:
         try:
             sn = ch.getDeviceSerialNumber()
             index = ch.getChannel()
-            request_id = self.generate_request_id() + '_on_channel_attach_handler'
+            request_id = self.generate_request_id() + '_channel_attach'
 
             # getChannelClassName fails before channel is attached - will be fixed in phidget release after Jan/2019: https://www.phidgets.com/phorum/viewtopic.php?f=26&t=9199&p=29646#p29646
             if ch.getChannelClass() == ChannelClass.PHIDCHCLASS_DIGITALINPUT:
@@ -173,7 +174,7 @@ class PhidgetsManager:
                 self.set_output_state(ch, initial_state, request_id, force_notify=True)
 
         except PhidgetException as e:
-            self.logger.exception('**************Error in Attach Event*********************')
+            self.logger.exception('**************Error in Channel Attach Event*********************')
             self.display_error(e)
 
     def on_manager_detach_handler(self, manager, ch_readonly):
@@ -221,7 +222,7 @@ class PhidgetsManager:
         :param ch: The DigitalInput channel that fired the StateChange event
         :param state: The reported state from the DigitalInput channel
         """
-        request_id = self.generate_request_id() + '_on_state_change_handler'
+        request_id = self.generate_request_id() + '_state_change'
         self.logger.info("State event: Channel Class: %s %d/%d, state: %r [%s]" % (ch.type, ch.getDeviceSerialNumber(), ch.getChannel(), state, request_id))
         self.notify_state_change(ch, state, request_id)
 
@@ -317,7 +318,11 @@ class PhidgetsManager:
                 return True
             elif default_state_type == 0:
                 return False
-            else:       # empty default type means to use  last state
+            else:       # empty default type means to use last state
                 return self.output_states.get_state(sn, index)
         except Exception:
             return None
+
+    def get_states(self, request_id):
+        for ch in self.channels.values():
+            self.notify_state_change(ch, ch.getState(), request_id)
