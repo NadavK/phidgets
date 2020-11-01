@@ -6,10 +6,13 @@ After=syslog.target network.target nss-lookup.target
 Type=simple
 ExecStart=/home/pi/Envs/phidgets/bin/python -u main.py 0.0.0.0:8081
 WorkingDirectory=/home/pi/phidgets/
+StandardOutput=append:/home/pi/phidgets/log/phidgets-out.log
 Restart=always
 RestartSec=5
 Environment="DEBUG=false"
-StandardOutput=file:/home/pi/phidgets/log/phidgets-out.log
+Restart=always
+RestartSec=5
+Environment="DEBUG=false"
 StandardError=inherit
 
 [Install]
