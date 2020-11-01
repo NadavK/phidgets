@@ -4,6 +4,7 @@ Provides an http interface to control and receive events from Phidget Devices.
 ## Installation
 ### Project
 1. Download the files to `/home/pi/phidgets/` 
+    1. Create log folder: `mkdir /home/pi/phidgets/log`
 1. pip install -r requirements.txt
 1. Install Phidget22 library for Python:
 
@@ -15,6 +16,7 @@ Provides an http interface to control and receive events from Phidget Devices.
         sudo apt-get update
         sudo apt-get install libphidget22 -y
     https://www.phidgets.com/docs/Language_-_Python_Linux_Terminal
+        download latest: https://www.phidgets.com/downloads/phidget22/libraries/any/Phidget22Python/
         in the Phidget22Python directory: python setup.py install
     ```
 
@@ -34,6 +36,12 @@ logs:
     journalctl -u phidgets -f
     ```
 
+### Sainsmart USB Relays
+#### USB permission
+```
+sudo bash -c "printf 'SUBSYSTEM==\"usb\", ATTR{idVendor}==\"1a86\", ATTR{idProduct}==\"7523\", GROUP=\"pi\" MODE=\"0666\"' > /etc/udev/rules.d/51-usb-perms.rules"
+sudo udevadm control --reload ; sudo udevadm trigger
+```
 ## License
 Licensed under the AGPL-3.0 License - see [LICENSE](LICENSE) for details
 

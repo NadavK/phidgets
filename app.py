@@ -4,7 +4,9 @@ import json
 import uuid
 
 from asynchttp import AsyncHttp
+from gpio import GpiosManager
 from phidget_io import PhidgetsManager
+from relay16 import SainSmartHid
 from settings import CALLBACK_URLS
 
 HTTP_REQUEST_ID_HEADER = 'Http-X-Request-Id'
@@ -14,13 +16,31 @@ class PhidgetApp:
 
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.phidgets = PhidgetsManager(self.input_changed, self.output_changed)
+        try:
+            self.phidgets = PhidgetsManager(self.input_changed, self.output_changed)
+        except Exception as ex:
+            self.logger.exception("PhidgetsManager Failed")
+
+        try:
+            self.gpios = GpiosManager(self.input_changed, self.output_changed)
+        except Exception as ex:
+            self.logger.exception("GPIO Failed")
+        try:
+            self.relay = SainSmartHid()
+        except NotImplementedError:
+            self.logger.warning("SainSmartHid not found")
+        except RuntimeError:
+            self.logger.warning("SainSmartHid failed to initialize")
+            #exit(91)
+        except Exception as ex:
+            self.logger.exception("SainSmartHid Failed")
+
         self.callback_urls = CALLBACK_URLS     # key=callback_url, value=token
         self.asyncHttp = AsyncHttp()
 
         request_id = uuid.uuid4().hex + '_PhidgetApp_init'
         for callback_url, token in self.callback_urls.items():
-            url = callback_url + 'outputs/outputs/'
+            url = callback_url + 'outputs/defaults/'
             self.logger.debug("Requesting default outputs, calling %s [%s]" % (url, request_id))
             self.asyncHttp.request("get", url, {}, token, request_id)
 
@@ -30,7 +50,8 @@ class PhidgetApp:
     #    self.close()
 
     def close(self):
-        self.phidgets.close()
+        if self.phidgets:
+            self.phidgets.close()
         #self.logger('PhidgetApp close')     # caused an exception
 
     @cherrypy.expose
@@ -47,7 +68,8 @@ class PhidgetApp:
         states = data.get('states')
         request_id = cherrypy.request.headers.get(HTTP_REQUEST_ID_HEADER)
         self.logger.info('Received request set default states for Phidget #%s outputs: \'%s\' [%s]' % (sn, states, request_id))
-        self.phidgets.set_default_output_states(sn, states, request_id=request_id)
+        if self.phidgets:
+            self.phidgets.set_default_output_states(sn, states, request_id=request_id)
 
     @cherrypy.expose
     @cherrypy.tools.allow(methods=['GET'])
@@ -59,7 +81,10 @@ class PhidgetApp:
         request_id = cherrypy.request.headers.get(HTTP_REQUEST_ID_HEADER)
         self.logger.info('Received get states request for all Phidgets [%s]' % request_id)
         try:
-            self.phidgets.get_states(request_id)
+            if self.phidgets:
+                self.phidgets.get_states(request_id)
+            if self.gpios:
+                self.gpios.get_states(request_id)
         except Exception as ex:
             self.logger.exception("")
             raise cherrypy.HTTPError(500, ex)
@@ -79,7 +104,15 @@ class PhidgetApp:
             state = json.loads(state)
             request_id = cherrypy.request.headers.get(HTTP_REQUEST_ID_HEADER)
             self.logger.info('Received set output state #%s/%s: %r [%s]' % (sn, index, state, request_id))
-            self.phidgets.set_output_state_from_sn_index(sn, index, state, request_id)
+            if 'sainsmart' in sn:
+                self.relay.set_output_state(int(index), state, request_id)
+                self.output_changed(sn, index, state, request_id)        # for now, blindly notify that output was changed
+            elif 'gpio' in sn:
+                self.gpios.set_output_state(int(index), state, request_id)
+                self.output_changed(sn, index, state, request_id)        # for now, blindly notify that output was changed
+            else:
+                if self.phidgets:
+                    self.phidgets.set_output_state_from_sn_index(sn, index, state, request_id)
             return "OK"
         except Exception as ex:
             self.logger.exception("")
