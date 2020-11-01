@@ -1,4 +1,5 @@
 import queue
+import time
 import uuid
 
 import requests
@@ -27,7 +28,7 @@ class RequestDetails:
 
 
 class AsyncHttp:
-    q = queue.Queue(100)
+    q = queue.Queue(1000)
     logger = logging.getLogger(__name__)
 
     def __init__(self):
@@ -49,16 +50,29 @@ class AsyncHttp:
             self.logger.exception('Queue failed')
             return False
 
-    def process_request(self):
+    def process_request(self, retry=0):
         while True:
             try:
                 details = self.q.get()
-                self.logger.debug('Sending request: %s' % details)
-                r = requests.request(method=details.method, url=details.url, json=details.json, headers=details.headers)
-                r.raise_for_status()
-                self.logger.debug('Request response code: %s <-- %s ' % (r.status_code, details))
-            except requests.exceptions.RequestException as e:
-                self.logger.error('notify request failed on library exception \'%s\' for %s: ' % (type(e).__name__, details))
+                self.send(details)
             except Exception:
-                self.logger.exception('notify request failed on exception')
+                self.logger.exception('failed to get from queue')
             self.q.task_done()
+
+    def send(self, details, retry=0):
+        try:
+            self.logger.debug('Sending request: %s' % details)
+            r = requests.request(method=details.method, url=details.url, json=details.json, headers=details.headers)
+            r.raise_for_status()
+            self.logger.debug('Request response code: %s <-- %s ' % (r.status_code, details))
+            return
+        except requests.exceptions.RequestException as e:
+            self.logger.error('notify request failed on library exception \'%s\' for %s: ' % (type(e).__name__, details))
+        except Exception:
+            self.logger.exception('notify request failed on exception')
+        if retry < 5:
+            self.logger.info('Retrying (%i)...' % retry)
+            time.sleep(1)
+            self.send(details, retry+1)
+        else:
+            self.logger.info('Max retries reached. I give up.')
