@@ -2,7 +2,6 @@
 import importlib
 import shelve
 import traceback
-import uuid
 import logging
 
 from Phidget22.ChannelClass import ChannelClass
@@ -12,10 +11,13 @@ from Phidget22.Devices.Manager import Manager
 from Phidget22.ErrorCode import ErrorCode
 from Phidget22.PhidgetException import PhidgetException
 from channel_states import ChannelStates
+from utils import generate_request_id
 
 
 # Manages all Phidgets
 # Should really be a singleton
+
+
 class PhidgetsManager:
     manager22 = None
     channels = {}
@@ -25,7 +27,7 @@ class PhidgetsManager:
     output_changed_external_handler = None
     INPUT = 'Input'
     OUTPUT = 'Output'
-    OUTPUTS_STATES_DB = 'phidgets_outputs.db'
+    OUTPUTS_STATES_DB = 'phidgets_outputs'
     STATES = 'states'
     DEFAULTS = 'defaults'
 
@@ -44,9 +46,6 @@ class PhidgetsManager:
         except Exception as e:
             traceback.print_tb(e.__traceback__)
             self.logger.exception('init')
-
-    def generate_request_id(self):
-        return uuid.uuid4().hex
 
     def write_output_states(self):
         try:
@@ -104,16 +103,19 @@ class PhidgetsManager:
         :param ch_readonly: The READ-ONLY Phidget channel that fired the attach event
         """
         try:
+            details = ''
             sn = ch_readonly.getDeviceSerialNumber()
             index = ch_readonly.getChannel()
             klass = ch_readonly.getChannelClassName()
+            details = '%s %i/%i' % (klass, sn, index)
 
             # Dynamically create a phidget channel
             if klass.startswith('Phidget'):  # PhidgetDigitalInput
                 python_klass_name = klass.split('Phidget')[1]
             else:
-                print('ERROR: Unknown classname: %s' % klass)
+                self.logger.error('ERROR: Unknown classname: %s' % klass)
                 return
+            details = '%s %i/%i' % (python_klass_name, sn, index)
             # Dynamically create phidget channel class
             ch_new = getattr(importlib.import_module('Phidget22.Devices.' + python_klass_name), python_klass_name)()
 
@@ -142,7 +144,7 @@ class PhidgetsManager:
             self.logger.debug("Attached: %s %i/%i" % (python_klass_name, sn, index))
 
         except PhidgetException as e:
-            self.logger.exception('**************Error in Manager Attach Event*********************')
+            self.logger.exception('**************Error in Manager Attach Event: ' + details)
             self.display_error(e)
 
     def on_channel_attach_handler(self, ch):
@@ -153,7 +155,7 @@ class PhidgetsManager:
         try:
             sn = ch.getDeviceSerialNumber()
             index = ch.getChannel()
-            request_id = self.generate_request_id() + '_channel_attach'
+            request_id = generate_request_id() + '_channel_attach'
 
             # getChannelClassName fails before channel is attached - will be fixed in phidget release after Jan/2019: https://www.phidgets.com/phorum/viewtopic.php?f=26&t=9199&p=29646#p29646
             if ch.getChannelClass() == ChannelClass.PHIDCHCLASS_DIGITALINPUT:
@@ -184,6 +186,7 @@ class PhidgetsManager:
         :param manager: The Phidget manager that fired the attach event
         :param ch_readonly: The READ-ONLY Phidget channel that fired the attach event
         """
+        self.logger.warning('Manager detach event: %s %d/%d' % (ch_readonly.getChannelClassName(), ch_readonly.getDeviceSerialNumber(), ch_readonly.getChannel()))
 
     def on_channel_detach_handler(self, ch):
         """
@@ -192,7 +195,7 @@ class PhidgetsManager:
         """
 
         try:
-            self.logger.debug("Detach event: %s %d/%d" % (ch.type, ch.getDeviceSerialNumber(), ch.getChannel()))
+            self.logger.warning("Detach event: %s %d/%d" % (ch.type, ch.getDeviceSerialNumber(), ch.getChannel()))
             self.channels.pop(self.get_channel_id_from_ch(ch), None)
         except PhidgetException as e:
             self.logger.exception('Error in Detach Event')
@@ -222,7 +225,7 @@ class PhidgetsManager:
         :param ch: The DigitalInput channel that fired the StateChange event
         :param state: The reported state from the DigitalInput channel
         """
-        request_id = self.generate_request_id() + '_state_change'
+        request_id = generate_request_id() + '_state_change'
         self.logger.info("State event: Channel Class: %s %d/%d, state: %r [%s]" % (ch.type, ch.getDeviceSerialNumber(), ch.getChannel(), state, request_id))
         self.notify_state_change(ch, state, request_id)
 
