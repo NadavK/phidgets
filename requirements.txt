@@ -1,5 +1,5 @@
 CherryPy==18.1.0
 Phidget22==1.0.0
-requests==2.21.0
+requests==2.31.0
 pyusb==1.0.2
 gpiozero==1.5.1
