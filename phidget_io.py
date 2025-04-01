@@ -11,7 +11,6 @@ from Phidget22.Devices.Manager import Manager
 from Phidget22.ErrorCode import ErrorCode
 from Phidget22.PhidgetException import PhidgetException
 from channel_states import ChannelStates
-from utils import generate_request_id
 
 
 # Manages all Phidgets
@@ -32,10 +31,15 @@ class PhidgetsManager:
     DEFAULTS = 'defaults'
 
     # Initialization
-    def __init__(self, input_changed_external_handler, output_changed_external_handler):
+    def __init__(self, channel_attached_external_handler=None,
+                 channel_detached_external_handler=None,
+                 input_changed_external_handler=None,
+                 output_changed_external_handler=None):
         try:
             self.logger = logging.getLogger(self.__class__.__name__)
             self.logger.info('Starting')
+            self.channel_attached_handler = channel_attached_external_handler
+            self.channel_detached_handler = channel_detached_external_handler
             self.input_changed_external_handler = input_changed_external_handler
             self.output_changed_external_handler = output_changed_external_handler
             self.read_output_states()
@@ -46,6 +50,11 @@ class PhidgetsManager:
         except Exception as e:
             traceback.print_tb(e.__traceback__)
             self.logger.exception('init')
+            raise e
+
+    # def get_device_serials(self):
+    #     """Returns a list of serial numbers for all connected Phidget devices"""
+    #     return list(self.channels.keys())  # Assuming self.channels is a dict keyed by serial numbers
 
     def write_output_states(self):
         try:
@@ -96,6 +105,7 @@ class PhidgetsManager:
             self.logger.error("Phidget Error: %s %s", e.details, ErrorCode.getName(e.code))
 
     def on_manager_attach_handler(self, manager, ch_readonly):
+        print('on_manager_attach_handler')
         """
         Fired when a Phidget channel is identified by the manager
         NOTE: ch is read-only!!!
@@ -144,7 +154,7 @@ class PhidgetsManager:
             self.logger.debug("Attached: %s %i/%i" % (python_klass_name, sn, index))
 
         except PhidgetException as e:
-            self.logger.exception('**************Error in Manager Attach Event: ' + details)
+            self.logger.exception(f'**************Error in Manager Attach Event: {details}')
             self.display_error(e)
 
     def on_channel_attach_handler(self, ch):
@@ -155,7 +165,6 @@ class PhidgetsManager:
         try:
             sn = ch.getDeviceSerialNumber()
             index = ch.getChannel()
-            request_id = generate_request_id() + '_channel_attach'
 
             # getChannelClassName fails before channel is attached - will be fixed in phidget release after Jan/2019: https://www.phidgets.com/phorum/viewtopic.php?f=26&t=9199&p=29646#p29646
             if ch.getChannelClass() == ChannelClass.PHIDCHCLASS_DIGITALINPUT:
@@ -163,23 +172,32 @@ class PhidgetsManager:
             elif ch.getChannelClass() == ChannelClass.PHIDCHCLASS_DIGITALOUTPUT:
                 ch.type = self.OUTPUT
             else:
-                self.logger.warning('Attached unknown type %s %i/%i) [%s]' % (ch.getChannelClassName(), sn, index, request_id))
-            self.logger.info('Channel attach event: %s %i/%i [%s]' % (ch.type, sn, index, request_id))
+                self.logger.warning('Attached unknown type %s %i/%i)' % (ch.getChannelClassName(), sn, index))
+            self.logger.info('Channel attach event: %s %i/%i' % (ch.type, sn, index))
 
             #if self.get_channel_id(ch.type, sn, index) not in self.channels:
             self.channels[self.get_channel_id_from_ch(ch)] = ch
 
             if ch.type == self.OUTPUT:
                 initial_state = self.get_initial_output_state(sn, index)
-                self.logger.debug('Setting initial value: %s [%s]' % (initial_state, request_id))
+                self.logger.debug(f'Setting initial value: {initial_state}')
                 # Force set_state to call notify_state_change even if state was not changed
-                self.set_output_state(ch, initial_state, request_id, force_notify=True)
+                self.set_output_state(ch, initial_state, force_notify=True)
+
+                # Force notification of initial state
+                current_state = ch.getState()
+                self.notify_state_change(ch, current_state)
+
+            # Notify external handler
+            if self.channel_attached_handler:
+                self.channel_attached_handler(sn, index, ch.type)
 
         except PhidgetException as e:
             self.logger.exception('**************Error in Channel Attach Event*********************')
             self.display_error(e)
 
     def on_manager_detach_handler(self, manager, ch_readonly):
+        print('on_manager_detach_handler')
         """
         Fired when a Phidget channel is detached by the manager
         NOTE: ch is read-only!!!
@@ -189,6 +207,7 @@ class PhidgetsManager:
         self.logger.warning('Manager detach event: %s %d/%d' % (ch_readonly.getChannelClassName(), ch_readonly.getDeviceSerialNumber(), ch_readonly.getChannel()))
 
     def on_channel_detach_handler(self, ch):
+        print('on_channel_detach_handler')
         """
         Fired when a Phidget channel detaches
         :param ch: The Phidget channel that fired the attach event
@@ -197,11 +216,19 @@ class PhidgetsManager:
         try:
             self.logger.warning("Detach event: %s %d/%d" % (ch.type, ch.getDeviceSerialNumber(), ch.getChannel()))
             self.channels.pop(self.get_channel_id_from_ch(ch), None)
+
+            # Notify external handler
+            if self.channel_detached_handler:
+                sn = ch.getDeviceSerialNumber()
+                index = ch.getChannel()
+                self.channel_detached_handler(sn, index, ch.type)
+
         except PhidgetException as e:
             self.logger.exception('Error in Detach Event')
             self.display_error(e)
 
     def on_error_handler(self, ch, errorCode, errorString):
+        print('on_error_handler')
         """
         Fired when a Phidget channel with onErrorHandler registered encounters an error in the library
         :param ch: the Phidget channel that fired the attach event
@@ -209,9 +236,13 @@ class PhidgetsManager:
         :param errorString: string containing the description of the error fired
         """
         self.logger.error("Phidget Error Event: %s (%s)" % (errorString, errorCode))
-        self.logger.error("Phidget Error Event on %s %d/%d: %s (%s)" % (ch.type, ch.getDeviceSerialNumber(), ch.getChannel(), errorString, errorCode))
+        try:
+            self.logger.error("Phidget Error Event on %s %d/%d: %s (%s)" % (ch.type, ch.getDeviceSerialNumber(), ch.getChannel(), errorString, errorCode))
+        except Exception as e:
+            pass
 
     def on_property_change_handler(self, ch, propertyName):
+        print('on_property_change_handler')
         """
         Occurs when a property is changed externally from the user channel, usually from a network client attached to the same channel.
         :param ch:
@@ -225,9 +256,8 @@ class PhidgetsManager:
         :param ch: The DigitalInput channel that fired the StateChange event
         :param state: The reported state from the DigitalInput channel
         """
-        request_id = generate_request_id() + '_state_change'
-        self.logger.info("State event: Channel Class: %s %d/%d, state: %r [%s]" % (ch.type, ch.getDeviceSerialNumber(), ch.getChannel(), state, request_id))
-        self.notify_state_change(ch, state, request_id)
+        self.logger.info("State event: Channel Class: %s %d/%d, state: %r" % (ch.type, ch.getDeviceSerialNumber(), ch.getChannel(), state))
+        self.notify_state_change(ch, state)
 
     def set_saved_output_state(self, ch, state):
         sn = str(ch.getDeviceSerialNumber())
@@ -249,33 +279,37 @@ class PhidgetsManager:
         else:
             self.logger.warning('Channel %s %s/%s not found in channels{}', classname, sn, index)
 
-    def notify_state_change(self, ch, state, request_id=None):
+    def notify_state_change(self, ch, state):
         sn = ch.getDeviceSerialNumber()
         index = ch.getChannel()
 
-        self.logger.info("Notifying %s %i/%i state changed to: %r [%s]" % (ch.type, sn, index, state, request_id))
+        self.logger.info("Notifying %s %i/%i state changed to: %r" % (ch.type, sn, index, state))
         if ch.type == self.INPUT:
             if self.input_changed_external_handler:
-                self.input_changed_external_handler(sn, index, state, request_id)
+                self.input_changed_external_handler(sn, index, state)
         elif ch.type == self.OUTPUT:
             if self.output_changed_external_handler:
-                self.output_changed_external_handler(sn, index, state, request_id)
+                self.output_changed_external_handler(sn, index, state)
         else:
-            self.logger.error("Notifying State Change: %i/%i unknown channel type: %s [%s]" % (sn, index, ch.type, request_id))
+            self.logger.error("Notifying State Change: %i/%i unknown channel type: %s" % (sn, index, ch.type))
 
-    def set_output_state_from_sn_index(self, sn, index, state, request_id):
+    def set_output_state_from_sn_index(self, sn, index, state):
         ch = self.get_channel(self.OUTPUT, sn, index)
-        return self.set_output_state(ch, state, request_id)
+        if ch is None:
+            self.logger.warning('Failed to find output %s/%s' % (sn, index))
+            return False
+        return self.set_output_state(ch, state)
 
-    def set_output_state(self, ch, state, request_id, force_notify=False):
+    def set_output_state(self, ch, state, force_notify=False):
         """
         Sets channel to supplied state.
         :param ch:
         :param state:
-        :param request_id:
         :param force_notify: Will call notify_state_change even if state did not change
         :return: Returns True if state was changed, False current state == supplied state
         """
+        state = bool(state)
+        self.logger.info(f'Request to change state: {ch.getDeviceSerialNumber()}/{ch.getChannel()} from {ch.getState()}--> {state} ({force_notify})')
         state_changed = False
         if state is None:
             # state can be None from on_channel_attach_handler, which means we just want to send the notification of the current state
@@ -291,27 +325,27 @@ class PhidgetsManager:
         # TODO: Consider sending event even if state not changed, to resolve sync issues
         # PhidgetManager library only calls state change handler for Inputs.
         if state_changed or force_notify:
-            self.notify_state_change(ch, state, request_id)
+            self.logger.info(f'Setting state: {ch.getDeviceSerialNumber()}/{ch.getChannel()} --> {state}')
+            self.notify_state_change(ch, state)
             self.output_states.set_state(ch.getDeviceSerialNumber(), ch.getChannel(), state is True)
             self.write_output_states()
         return state_changed
 
-    def set_default_output_states(self, sn, states, request_id=None):
+    def set_default_output_states(self, sn, states):
         """
         Sets the initial states of the outputs, for the next time that the phidget connects
         :param sn:
         :param initial_outputs: string-based bitmask of the states
-        :param request_id:
         :return: None
         """
-        self.logger.info("Settings states for Phidget #%s, '%s' [%s]" % (sn, states, request_id))
+        self.logger.info("Settings states for Phidget #%s, '%s'" % (sn, states))
         self.default_output_state.del_sn(sn)  # Clear the states for this sn
         for i in range(0, len(states)):
             state = 1 if states[i] in [1, '1'] else 0 if states[i] in [0, '0'] else '*' if states[i] in ['*'] else None
             self.default_output_state.set_state(sn, i, state)
             if state in [1, 0]:
-                self.logger.info("Setting Phidget #%s/%i, state: %s [%s]" % (sn, i, states[i], request_id))
-                self.set_output_state_from_sn_index(sn, i, state, request_id)
+                self.logger.info("Setting Phidget #%s/%i, state: %s" % (sn, i, states[i]))
+                self.set_output_state_from_sn_index(sn, i, state)
         self.write_output_states()
 
     def get_initial_output_state(self, sn, index):
@@ -326,6 +360,32 @@ class PhidgetsManager:
         except Exception:
             return None
 
-    def get_states(self, request_id):
+    def get_states(self):
         for ch in self.channels.values():
-            self.notify_state_change(ch, ch.getState(), request_id)
+            self.notify_state_change(ch, ch.getState())
+
+
+def main():
+    import settings
+    import logging.config
+
+    logging.config.dictConfig(settings.LOGGING)
+    gpios = PhidgetsManager(None, None)
+    import time
+    logger = logging.getLogger('YOYO')
+    logger.info('Eh!')
+
+    try:
+        time.sleep(4)
+        while True:
+            gpios.set_output_state_from_sn_index(344662, 0, True)
+            time.sleep(1)
+            gpios.set_output_state_from_sn_index(344662, 0, False)
+            time.sleep(1)
+    except KeyboardInterrupt:
+        pass
+    print('ready')
+
+
+if __name__ == "__main__":
+    main()

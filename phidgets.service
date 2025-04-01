@@ -1,15 +1,18 @@
 [Unit]
-Description=Phidget Server djhome process manager
+Description=Phidget MQTT Service
 After=syslog.target network.target nss-lookup.target
 
 [Service]
 Type=simple
+User=root
+Group=root
 ExecStart=/home/pi/Envs/phidgets/bin/python -u main.py 0.0.0.0:8081
 WorkingDirectory=/home/pi/phidgets/
 StandardOutput=append:/home/pi/phidgets/log/phidgets-out.log
 Restart=always
 RestartSec=5
 Environment="DEBUG=false"
+#Environment=HA_HOST=homeassistant.local
 Restart=always
 RestartSec=5
 Environment="DEBUG=false"

@@ -23,7 +23,7 @@ import traceback
 import usb.core
 import usb.util
 import logging
-
+from utils import get_device_id
 
 class SainSmartHid:
     command = {
@@ -92,12 +92,25 @@ class SainSmartHid:
         {True: '16 ON', False: '16 OFF'},
     ]
 
-    def __init__(self):
+    def __init__(self,
+                 channel_attached_external_handler=None,
+                 output_changed_external_handler=None):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.info('Starting')
         self.device = None
         self.ep = None
+        self.channel_attached_external_handler = channel_attached_external_handler
+        self.output_changed_external_handler = output_changed_external_handler
+        self.sn = get_device_id()
         self.connect_device()
+        # Publish available channels
+        self.publish_available_channels()
+
+    def publish_available_channels(self):
+        """Publish all available relay channels for discovery by Home Assistant"""
+        if self.channel_attached_external_handler:
+            for i in range(1, 17):
+                self.channel_attached_external_handler(self.sn, i, 'Output')
 
     def disconnect_device(self):
         try:
@@ -169,24 +182,32 @@ class SainSmartHid:
             self.logger.exception('Failure connecting')
             raise RuntimeError('SainSmart init failed')
 
-    def set_output_state(self, index, state, request_id, force_notify=False):
-        try:
-            command = self.command[self.command_indexes[index][state]]
-        except Exception as e:
-            self.logger.exception('Failed obtaining command for index: {}, state {} [{}]'.format(index, state, request_id))
-            return
+    def set_output_state(self, sn, index, state, force_notify=False):
 
-        try:
-            self.ep.write(command)
-        except Exception as e:
-            traceback.print_tb(e.__traceback__)
-            self.logger.exception('Failed writing to device (will retry) [{}]'.format(request_id))
-            self.connect_device()
+        # Write command to device with optional retry logic.
+        def write_command_to_device(retry=True):
             try:
                 self.ep.write(command)
+                self.logger.debug(f'Writing command: {command}')
+                return True
             except Exception as e:
-                traceback.print_tb(e.__traceback__)
-                self.logger.exception('Failed writing to device (gave up) [{}]'.format(request_id))
+                # Logger.exception already includes the traceback
+                self.logger.exception(f'Failed writing to device {"(will retry)" if retry else "(gave up)"}')
+                if retry:
+                    self.connect_device()
+                    return write_command_to_device(retry=False)
+                return False
+        try:
+            if not sn == self.sn: # Ignore if the serial number doesn't match
+                self.logger.debug(f'not my sn: {sn} vs {self.sn}')
+                return
+            command = self.command[self.command_indexes[index][state]]
+        except Exception as e:
+            self.logger.exception('Failed obtaining command for index: {}, state {}'.format(index, state))
+            return
+        if write_command_to_device() and self.output_changed_external_handler:
+            # Use "kitchen" as the channel name for relay outputs
+            self.output_changed_external_handler(self.sn, index, state)
 
     def test_allonoff(self):
         time.sleep(10)

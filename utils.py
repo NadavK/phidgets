@@ -15,6 +15,8 @@ def get_sn():
 
     return cpuserial
 
+def get_device_id():
+    return get_sn().lstrip("0")
 
 def generate_request_id():
     return uuid.uuid4().hex
